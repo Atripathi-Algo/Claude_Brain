@@ -13,7 +13,7 @@ export default function TreeView({ selected, onSelect, seq }: { selected: string
       {tree.map((p) => (
         <div key={p.id}>
           <button className="row proj" role="treeitem" aria-expanded={open.has(p.id)} onClick={() => toggle(p.id)}>
-            <span>{open.has(p.id) ? "▾" : "▸"} {p.label}</span>
+            <span>{open.has(p.id) ? "▾" : "▸"} {p.drive ? `${p.drive}: ` : ""}{p.label}{p.no_memory && <span className="muted"> (no notes)</span>}</span>
             <span className="bar"><i style={{ width: `${(p.tokens_est / max) * 100}%` }} /></span>
             <span className="muted">~{p.tokens_est} tok</span>
           </button>

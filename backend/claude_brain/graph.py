@@ -4,10 +4,12 @@ import json
 import os
 import re
 import threading
+import time
 from functools import wraps
 from pathlib import Path
 
 from . import config, parsers, transcripts
+from . import discover as discovery
 from .redact import redact
 
 
@@ -30,7 +32,7 @@ def _locked(fn):
 
 
 class Brain:
-    def __init__(self, home=None, state_path=None):
+    def __init__(self, home=None, state_path=None, discover=False):
         self.home = Path(home or config.load()["claude_home"])
         self.state_path = state_path or os.environ.get("CLAUDE_BRAIN_STATE") or (config.APP_DIR / "reads.json")
         self.state = {}
@@ -40,6 +42,9 @@ class Brain:
         self.indexes = {}  # project node id -> index info
         self.seq = 0
         self._loaded = False
+        self._cwd = {}
+        self.discover = discover
+        self._disk = ([], 0.0)
         self.lock = threading.RLock()
 
     # ---- state (app's own data folder only) ----
@@ -89,16 +94,21 @@ class Brain:
         if pdir.is_dir():
             for pd in sorted(p for p in pdir.iterdir() if p.is_dir()):
                 mem = pd / "memory"
-                if not mem.is_dir():
-                    continue
-                files = [f for f in mem.glob("*.md") if f.is_file()]
-                if not files:
-                    continue
+                files = [f for f in mem.glob("*.md") if f.is_file()] if mem.is_dir() else []
                 pid = "proj:" + pd.name
-                cwd = transcripts.project_cwd(pd)
+                if pd.name not in self._cwd:  # cached: reading transcript heads on every refresh is wasteful
+                    self._cwd[pd.name] = transcripts.project_cwd(pd)
+                cwd = self._cwd[pd.name]
+                m = re.match(r"^([A-Za-z]):", cwd or "") or re.match(r"^([A-Za-z])--", pd.name)
                 add({"id": pid, "kind": "project", "label": Path(cwd).name if cwd else pd.name, "project": pid,
                      "type": "project", "path": cwd or str(pd), "mtime": 0, "size": 0, "tokens_est": 0,
-                     "last_read_at": None, "read_count": 0, "flags": []})
+                     "last_read_at": None, "read_count": 0, "drive": m.group(1).upper() if m else None,
+                     "flags": [] if files else ["no_memory"]})
+                pcm = Path(cwd) / "CLAUDE.md" if cwd else None  # the project's own CLAUDE.md, if it still exists
+                if pcm and pcm.is_file():
+                    cid = f"claude_md:{pd.name}"
+                    add(self._node(cid, "claude_md", "CLAUDE.md", pid, "instructions", pcm, parsers.read_text(pcm)))
+                    self.edges.append(self._edge(cid, pid, "in_project", True))
                 listed = {}
                 iid = f"idx:{pd.name}"
                 for f in sorted(files):
@@ -140,6 +150,23 @@ class Brain:
                 for fname in orphans:
                     self.nodes[f"mem:{pd.name}/{fname}"]["flags"].append("orphan")
 
+        if self.discover:  # project folders on disk that Claude has not (yet) stored anything for
+            known = {str(n["path"]).lower().rstrip("\\/") for n in self.nodes.values() if n["kind"] == "project"}
+            for d in self._disk_projects():
+                enc = re.sub(r"[^A-Za-z0-9]", "-", str(d))
+                if "proj:" + enc in self.nodes or str(d).lower().rstrip("\\/") in known:
+                    continue
+                pid = "proj:" + enc
+                m = re.match(r"^([A-Za-z]):", str(d))
+                add({"id": pid, "kind": "project", "label": d.name, "project": pid, "type": "project", "path": str(d),
+                     "mtime": 0, "size": 0, "tokens_est": 0, "last_read_at": None, "read_count": 0,
+                     "drive": m.group(1).upper() if m else None, "flags": ["no_memory", "not_in_claude_store"]})
+                pcm = d / "CLAUDE.md"
+                if pcm.is_file():
+                    cid = f"claude_md:{enc}"
+                    add(self._node(cid, "claude_md", "CLAUDE.md", pid, "instructions", pcm, parsers.read_text(pcm)))
+                    self.edges.append(self._edge(cid, pid, "in_project", True))
+
         for nid, note in self.notes.items():
             pid = self.nodes[nid]["project"]
             for target in note["links"]:
@@ -176,10 +203,21 @@ class Brain:
                 deg[e["dst"]] = deg.get(e["dst"], 0) + 1
         for i, n in self.nodes.items():
             n["degree"] = deg.get(i, 0)
+            if n["kind"] != "project":
+                n["drive"] = self.nodes[n["project"]].get("drive") if n.get("project") in self.nodes else None
         for pid, n in self.nodes.items():
             if n["kind"] == "project":
                 n["tokens_est"] = sum(m["tokens_est"] for m in self.nodes.values()
-                                      if m["project"] == pid and m["kind"] in ("memory", "index"))
+                                      if m["project"] == pid and m["kind"] in ("memory", "index", "claude_md"))
+
+    def _disk_projects(self, ttl=300):
+        """Disk scan is cached for `ttl` seconds so frequent refreshes stay cheap."""
+        found, at = self._disk
+        if time.time() - at > ttl:
+            roots = [Path(r) for r in config.load().get("project_roots") or discovery.default_roots()]
+            found = discovery.discover(roots)
+            self._disk = (found, time.time())
+        return found
 
     def _similar(self, threshold, topk=3):
         ids = list(self.notes)
@@ -262,12 +300,14 @@ class Brain:
                 continue
             groups = {}
             for n in self.nodes.values():
-                if n["project"] == pid and n["kind"] in ("memory", "index"):
+                if n["project"] == pid and n["kind"] in ("memory", "index", "claude_md"):
                     groups.setdefault(n["type"], []).append(
                         {"id": n["id"], "label": n["label"], "tokens_est": n["tokens_est"], "flags": n["flags"]})
-            out.append({"id": pid, "label": p["label"], "tokens_est": p["tokens_est"],
+            out.append({"id": pid, "label": p["label"], "tokens_est": p["tokens_est"], "drive": p.get("drive"),
+                        "no_memory": "no_memory" in p["flags"],
                         "types": [{"type": t, "tokens_est": sum(x["tokens_est"] for x in v), "notes": v}
                                   for t, v in sorted(groups.items())]})
+        out.sort(key=lambda r: (-r["tokens_est"], r["label"].lower()))
         return out
 
     @_locked

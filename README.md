@@ -12,6 +12,9 @@ cd backend && python -m claude_brain          # http://127.0.0.1:8765
 ```
 First scan reads all transcripts once (~40 s for ~1 GB); later scans only read appended bytes (state in `%USERPROFILE%\.claude-brain\reads.json`).
 
+## Which projects appear
+Every folder in `~/.claude/projects` becomes a project node, even with no notes (marked "no notes"), plus folders on disk that contain a `CLAUDE.md` or `.claude` folder but that Claude has not stored anything for (marked `not_in_claude_store`). Disk discovery is read-only, scans `D:\`, `E:\` (if present) and your home folder up to 3 levels deep, skips `node_modules`/`.git`/`AppData` and similar, and is cached for 5 minutes. Override the roots with `project_roots` in `~/.claude-brain/config.json`. Filter by drive and hide empty projects in the UI.
+
 ## Privacy model
 - Binds to 127.0.0.1; `Host`/`Origin` headers are validated (403 otherwise).
 - Write mode is OFF by default and the server refuses every write until you turn it on in Settings. With it off, nothing outside `%USERPROFILE%\.claude-brain\` is ever written.

@@ -42,6 +42,8 @@ def context_cost(brain):
                 if cm.is_file():
                     proj_tok = est_tokens(len(parsers.read_text(cm)))
             idx = brain.indexes.get(pid)
+            if not idx and not proj_tok:
+                continue  # nothing project-specific is loaded; don't list every empty project
             idx_tok = lines = size = 0
             if idx:
                 node = brain.nodes.get("idx:" + pid[5:])

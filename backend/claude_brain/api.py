@@ -25,7 +25,7 @@ def _hostname(value):
 
 def create_app(brain=None, auto_scan=True, watch=None):
     app = FastAPI(title="Claude Brain", docs_url=None, redoc_url=None)
-    brain = brain or Brain()
+    brain = brain or Brain(discover=True)
     svc = Service(brain)
     app.state.brain, app.state.svc = brain, svc
     watcher = Watcher(svc, config.load().get("refresh_minutes", 5))

@@ -85,6 +85,11 @@ export default function App() {
       <div className="filters">
         <input placeholder="Search nodes…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })}
           onKeyDown={(e) => { if (e.key === "Enter" && match) select(match.id); }} aria-label="Search" />
+        <select value={f.drive} onChange={(e) => setF({ ...f, drive: e.target.value })} aria-label="Drive">
+          <option value="">All drives</option>
+          {[...new Set(projects.map((p) => p.drive).filter(Boolean))].sort().map((d) => <option key={d} value={d}>{d}:</option>)}
+        </select>
+        <label><input type="checkbox" checked={f.emptyProjects} onChange={() => setF({ ...f, emptyProjects: !f.emptyProjects })} />projects without notes</label>
         <select value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} aria-label="Project">
           <option value="">All projects</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
