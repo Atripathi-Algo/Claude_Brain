@@ -14,14 +14,15 @@ First scan reads all transcripts once (~40 s for ~1 GB); later scans only read a
 
 ## Privacy model
 - Binds to 127.0.0.1; `Host`/`Origin` headers are validated (403 otherwise).
-- Phase 1 writes only to `%USERPROFILE%\.claude-brain\`. Memory files, transcripts and settings are never modified.
+- Write mode is OFF by default and the server refuses every write until you turn it on in Settings. With it off, nothing outside `%USERPROFILE%\.claude-brain\` is ever written.
+- With it on, writes are limited to `~/.claude/projects/*/memory/*.md`; each one is atomic (temp file + rename), backed up to `%USERPROFILE%\.claude-brain	rash\` first, refused if the file changed since you loaded it, and undoable (Undo refuses if the file changed again). Deletes only ever move files to the trash. Transcripts, `settings.json`, `CLAUDE.md` and any `sales-insight-demo` folder are never touched. Notes containing secret-like text are not editable in the UI.
 - Secrets (keys, tokens, `password=`, private keys) are redacted in API output; Markdown is sanitised with DOMPurify.
 
 ## How refresh works
 A watchdog observer watches `~/.claude/projects` and `CLAUDE.md`. Note edits are debounced (0.5 s), transcript appends are throttled (8 s), and a full reconcile runs every 5 min plus the Rescan button. Each refresh diffs the graph and pushes deltas (`node_upsert`, `node_delete`, `edge_upsert`, `edge_delete`, `metrics_changed`, `health_changed`) over SSE at `/api/events` with a monotonic sequence number. The client resyncs from `/api/graph` on a gap or reconnect, keeps existing nodes pinned while new ones settle, and shows Live / Reconnecting / Paused.
 
 ## Status
-Phase 1 (scanner, graph, 3D/2D Brain, Tree, inspector, filters) and Phase 2 (live refresh, token charts, treemap, health view, FTS5 search at `/api/search`). Not yet: write-back (Phase 3), plugin (Phase 4), settings editing in the UI.
+Phase 1 (scanner, graph, 3D/2D Brain, Tree, inspector, filters) and Phase 2 (live refresh, token charts, treemap, health view, FTS5 search at `/api/search`). Phase 3 (opt-in write-back: edit with live diff, create, merge, trash, index add/remove, undo). Not yet: plugin (Phase 4), "mark stale" action, editing settings other than write mode.
 Known limits: project label comes from the transcript `cwd`; inferred edges are TF-IDF similarity and same-session co-reads; token usage is read from transcript `usage` records (de-duplicated per message id, not independently verified against billing); memory growth uses file mtime.
 
 ## Tests

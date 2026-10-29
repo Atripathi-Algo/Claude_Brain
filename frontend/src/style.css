@@ -51,3 +51,14 @@ main { flex: 1; display: flex; min-height: 0; }
 .stack { display: flex; height: 10px; min-width: 8px; border-radius: 5px; overflow: hidden; margin: 4px 0; background: var(--line); } .stack i { display: block; }
 .health summary { cursor: pointer; margin: 8px 0 2px; } .health ul { margin: 4px 0 8px; padding-left: 20px; }
 button.link { border: 0; padding: 0; color: var(--accent); text-decoration: underline; }
+.row-btn { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+.editor textarea { width: 100%; min-height: 220px; font: 12px/1.4 ui-monospace, Consolas, monospace; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
+.diff { background: var(--bg); border-radius: 6px; padding: 6px; font: 12px/1.35 ui-monospace, Consolas, monospace; overflow: auto; max-height: 180px; margin: 0; }
+.diff .add { color: #4ade80; } .diff .del { color: #ff7a90; }
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 50; }
+.modal { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; width: min(480px, 92vw); max-height: 90vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.modal label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); } .modal label.switch { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+.modal textarea { min-height: 90px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12px; } .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 14px; z-index: 60; }
+button.fix { margin-left: 8px; padding: 0 8px; font-size: 12px; }

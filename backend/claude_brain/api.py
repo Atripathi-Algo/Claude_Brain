@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config, metrics
 from .events import Service, Watcher, sse
 from .graph import Brain
+from .writes import WriteError, Writer
 
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -98,6 +99,59 @@ def create_app(brain=None, auto_scan=True, watch=None):
     @app.get("/api/settings")
     def settings():
         return config.load()
+
+    @app.put("/api/settings")
+    def put_settings(body: dict):
+        try:
+            return config.update(body)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    # ---- Phase 3: write-back (every route is gated by the read-only setting inside Writer) ----
+    writer = Writer(brain, svc)
+    app.state.writer = writer
+
+    @app.exception_handler(WriteError)
+    async def _write_error(request: Request, exc: WriteError):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status)
+
+    @app.get("/api/note-raw/{nid:path}")
+    def note_raw(nid: str):
+        return writer.load(nid)
+
+    @app.post("/api/note-preview/{nid:path}")
+    def note_preview(nid: str, body: dict):
+        return writer.preview(nid, str(body.get("content", "")))
+
+    @app.post("/api/note/{nid:path}")
+    def note_edit(nid: str, body: dict):
+        return writer.edit(nid, str(body.get("content", "")), body.get("base_hash"))
+
+    @app.post("/api/notes/create")
+    def note_create(body: dict):
+        return writer.create(body.get("project", ""), body.get("name", ""), body.get("type", "project"),
+                             body.get("description", ""), body.get("body", ""))
+
+    @app.post("/api/notes/merge")
+    def notes_merge(body: dict):
+        return writer.merge(list(body.get("ids", [])), dict(body.get("base_hashes", {})))
+
+    @app.post("/api/notes/trash")
+    def notes_trash(body: dict):
+        return writer.trash_note(body.get("id", ""), body.get("base_hash"))
+
+    @app.post("/api/index")
+    def index_edit(body: dict):
+        return writer.index_edit(body.get("project", ""), body.get("action", ""), body.get("file", ""),
+                                 body.get("title", ""), body.get("hook", ""))
+
+    @app.post("/api/undo")
+    def undo():
+        return writer.undo()
+
+    @app.get("/api/history")
+    def history():
+        return writer.history()
 
     @app.post("/api/rescan")
     def rescan():

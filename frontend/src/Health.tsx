@@ -7,7 +7,29 @@ const LABEL: Record<string, string> = {
   malformed_frontmatter: "Malformed front-matter", no_frontmatter: "No front-matter", stale_ref: "Stale reference (path no longer exists)",
 };
 
-export default function Health({ tick, onOpen }: { tick: number; onOpen: (id: string) => void }) {
+interface HP { tick: number; onOpen: (id: string) => void; writeOn: boolean; onWrote: (msg?: string) => void; onCreate: (name: string) => void }
+
+/** Safe, undoable fix for an issue (only offered in write mode). */
+function Fix({ i, onWrote, onCreate }: { i: any; onWrote: (m?: string) => void; onCreate: (name: string) => void }) {
+  const [err, setErr] = useState("");
+  const kind = i.issue.split(":")[0];
+  const run = async (action: "add" | "remove", project: string, file: string, title?: string) => {
+    try { onWrote((await fetch("/api/index", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, action, file, title }) }).then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.detail); return j; })).desc); }
+    catch (e: any) { setErr(e.message); }
+  };
+  const folder = i.node.replace(/^(mem|idx):/, "").split("/")[0];
+  const file = i.node.split("/").pop();
+  return (
+    <>
+      {kind === "orphan" && <button className="fix" onClick={() => run("add", "proj:" + folder, file, i.label)}>Add to index</button>}
+      {kind === "dead_entry" && <button className="fix" onClick={() => run("remove", "proj:" + folder, i.issue.split(":")[1])}>Remove index line</button>}
+      {kind === "ghost" && <button className="fix" onClick={() => onCreate(i.label)}>Create note</button>}
+      {err && <span className="warn small"> {err}</span>}
+    </>
+  );
+}
+
+export default function Health({ tick, onOpen, writeOn, onWrote, onCreate }: HP) {
   const [cost, setCost] = useState<any[]>([]);
   const [issues, setIssues] = useState<any[]>([]);
   useEffect(() => {
@@ -39,11 +61,12 @@ export default function Health({ tick, onOpen }: { tick: number; onOpen: (id: st
           <summary>{LABEL[k] ?? k} <span className="badge">{list.length}</span></summary>
           <ul>{list.map((i, n) => (
             <li key={n}><button className="link" onClick={() => onOpen(i.node)}>{i.label}</button>
-              {i.issue.includes(":") && <span className="muted small"> {i.issue.slice(i.issue.indexOf(":") + 1)}</span>}</li>
+              {i.issue.includes(":") && <span className="muted small"> {i.issue.slice(i.issue.indexOf(":") + 1)}</span>}
+              {writeOn && <> <Fix i={i} onWrote={onWrote} onCreate={onCreate} /></>}</li>
           ))}</ul>
         </details>
       ))}
-      <p className="muted small">Read-only: fixes arrive in Phase 3, behind an explicit opt-in.</p>
+      <p className="muted small">{writeOn ? "Write mode is on: fix buttons make a backup and can be undone." : "Read-only. Turn on write mode in Settings to get one-click fixes."}</p>
     </div>
   );
 }

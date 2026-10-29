@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-APP_DIR = Path.home() / ".claude-brain"
+APP_DIR = Path(os.environ.get("CLAUDE_BRAIN_DIR") or (Path.home() / ".claude-brain"))
 CONFIG_PATH = APP_DIR / "config.json"
 
 DEFAULTS = {
@@ -31,3 +31,21 @@ def load():
 def save(cfg):
     APP_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+EDITABLE = {"read_only": bool, "refresh_minutes": int, "node_cap_3d": int, "similarity_threshold": float, "theme": str}
+
+
+def update(partial):
+    """Persist only whitelisted, correctly-typed keys (never claude_home or the env override)."""
+    try:
+        cur = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cur = {}
+    for k, v in partial.items():
+        t = EDITABLE.get(k)
+        if t is None or isinstance(v, bool) != (t is bool) or not isinstance(v, (t, int) if t is float else t):
+            raise ValueError(f"invalid setting: {k}")
+        cur[k] = v
+    save(cur)
+    return load()
