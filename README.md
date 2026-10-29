@@ -23,7 +23,7 @@ A watchdog observer watches `~/.claude/projects` and `CLAUDE.md`. Note edits are
 
 ## Status
 Phase 1 (scanner, graph, 3D/2D Brain, Tree, inspector, filters) and Phase 2 (live refresh, token charts, treemap, health view, FTS5 search at `/api/search`). Phase 3 (opt-in write-back: edit with live diff, create, merge, trash, index add/remove, undo). Phase 4: optional `plugin/` (SessionStart hook that only creates a missing `memory/` + `MEMORY.md`; see `plugin/README.md`). Not yet: "mark stale" action, editing settings other than write mode.
-Known limits: project label comes from the transcript `cwd`; inferred edges are TF-IDF similarity and same-session co-reads; token usage is read from transcript `usage` records (de-duplicated per message id, not independently verified against billing); memory growth uses file mtime.
+Known limits: project label comes from the transcript `cwd`; inferred edges are TF-IDF similarity and same-session co-reads; token usage is read from transcript `usage` records (de-duplicated per message id; for one session the totals matched that transcript's own cost record exactly, but other sessions' cost records cover resumed or partial runs, so they could not be compared, and none was checked against billing); memory growth uses file mtime.
 
 ## Tests
 `python -m pytest tests` and `cd frontend && npx vitest run`.
