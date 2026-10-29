@@ -1,7 +1,10 @@
 """Build the memory graph from a claude-home directory (read-only)."""
 import itertools
 import json
+import os
 import re
+import threading
+from functools import wraps
 from pathlib import Path
 
 from . import config, parsers, transcripts
@@ -18,23 +21,38 @@ def _ghost(name):
             "last_read_at": None, "read_count": 0, "flags": ["ghost"]}
 
 
+def _locked(fn):
+    @wraps(fn)
+    def w(self, *a, **k):
+        with self.lock:
+            return fn(self, *a, **k)
+    return w
+
+
 class Brain:
     def __init__(self, home=None, state_path=None):
         self.home = Path(home or config.load()["claude_home"])
-        self.state_path = state_path or (config.APP_DIR / "reads.json")
+        self.state_path = state_path or os.environ.get("CLAUDE_BRAIN_STATE") or (config.APP_DIR / "reads.json")
         self.state = {}
         self.nodes = {}
         self.edges = []
         self.notes = {}  # node id -> parsed note
         self.indexes = {}  # project node id -> index info
         self.seq = 0
+        self._loaded = False
+        self.lock = threading.RLock()
 
     # ---- state (app's own data folder only) ----
     def _load_state(self):
+        if self._loaded:
+            return
+        self._loaded = True
         try:
             self.state = json.loads(Path(self.state_path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             self.state = {}
+        if self.state.get("v") != transcripts.STATE_VERSION:
+            self.state = {"v": transcripts.STATE_VERSION}  # re-scan: older state lacks usage data
 
     def _save_state(self):
         try:
@@ -44,12 +62,17 @@ class Brain:
             pass
 
     # ---- build ----
-    def rebuild(self, scan_transcripts=True):
+    def rebuild(self, scan_transcripts=True, progress=None):
         self._load_state()
         pdir = self.home / "projects"
         if scan_transcripts and pdir.is_dir():
-            if transcripts.scan(pdir, self.state):
+            if transcripts.scan(pdir, self.state, progress):  # slow part, outside the lock
                 self._save_state()
+        with self.lock:
+            self._build()
+
+    def _build(self):
+        pdir = self.home / "projects"
         reads = self.state.get("reads", {})
         self.nodes, self.edges, self.notes, self.indexes = {}, [], {}, {}
         by_name = {}
@@ -157,7 +180,6 @@ class Brain:
             if n["kind"] == "project":
                 n["tokens_est"] = sum(m["tokens_est"] for m in self.nodes.values()
                                       if m["project"] == pid and m["kind"] in ("memory", "index"))
-        self.seq += 1
 
     def _similar(self, threshold, topk=3):
         ids = list(self.notes)
@@ -196,6 +218,7 @@ class Brain:
                 "last_read_at": None, "read_count": 0, "flags": []}
 
     # ---- views ----
+    @_locked
     def graph(self, project=None, kind=None, ntype=None, q=None):
         nodes = list(self.nodes.values())
         if project:
@@ -212,6 +235,7 @@ class Brain:
         edges = [e for e in self.edges if e["src"] in ids and e["dst"] in ids]
         return {"seq": self.seq, "nodes": nodes, "edges": edges}
 
+    @_locked
     def node_detail(self, nid):
         n = self.nodes.get(nid)
         if not n:
@@ -230,6 +254,7 @@ class Brain:
                         for e in self.edges if nid in (e["src"], e["dst"]) and e["kind"] in ("similar", "co_read")]
         return d
 
+    @_locked
     def tree(self):
         out = []
         for pid, p in self.nodes.items():
@@ -245,6 +270,7 @@ class Brain:
                                   for t, v in sorted(groups.items())]})
         return out
 
+    @_locked
     def health(self):
         issues = []
         keep = ("orphan", "dead_entry", "ghost", "oversized", "index_over_cap", "duplicate_candidate",

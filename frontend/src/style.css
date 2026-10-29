@@ -39,3 +39,15 @@ main { flex: 1; display: flex; min-height: 0; }
 .proj { font-weight: 600; } .indent { margin-left: 18px; } .row .muted { text-align: right; font-size: 12px; }
 .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; } .bar i { display: block; height: 100%; background: var(--accent); }
 @media (max-width: 800px) { main { flex-direction: column; } .inspector { width: auto; max-width: none; max-height: 40%; border-left: 0; border-top: 1px solid var(--line); } .row { grid-template-columns: 1fr 70px; } .row .bar { display: none; } }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+.live.live i { background: #4ade80; box-shadow: 0 0 6px #4ade80; } .live.paused i { background: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; padding: 14px; align-content: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.card-h { display: flex; justify-content: space-between; align-items: center; } .card-h h3 { margin: 0; font-size: 14px; } .card-h button { margin-left: 6px; padding: 1px 8px; font-size: 12px; }
+.chart { height: 280px; } .small { font-size: 12px; margin: 4px 0; }
+.health { padding: 14px 18px; max-width: 900px; } .health h2 { font-size: 15px; margin: 14px 0 4px; }
+.meter { margin: 10px 0; } .meter-h { display: flex; justify-content: space-between; }
+.stack { display: flex; height: 10px; min-width: 8px; border-radius: 5px; overflow: hidden; margin: 4px 0; background: var(--line); } .stack i { display: block; }
+.health summary { cursor: pointer; margin: 8px 0 2px; } .health ul { margin: 4px 0 8px; padding-left: 20px; }
+button.link { border: 0; padding: 0; color: var(--accent); text-decoration: underline; }

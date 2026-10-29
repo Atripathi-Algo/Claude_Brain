@@ -1,21 +1,25 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { getGraph, rescan, type GraphData } from "./api";
+import { rescan } from "./api";
+import { useLiveGraph } from "./live";
+import Health from "./Health";
 import { applyFilters, defaultFilters, TYPE_COLOR, webglOk, type Filters } from "./model";
 import Inspector from "./Inspector";
 import TreeView from "./TreeView";
 import Graph2D from "./Graph2D";
 
 const Graph3D = lazy(() => import("./Graph3D"));
+const Charts = lazy(() => import("./Charts"));
 const reduceMotion = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const NODE_CAP_3D = 3000;
 const KINDS = ["project", "memory", "index", "claude_md", "ghost"];
 const TYPES = ["user", "feedback", "project", "reference"];
 
 export default function App() {
-  const [g, setG] = useState<GraphData>({ seq: 0, nodes: [], edges: [] });
+  const { g, state: live, status, updated, flares, metricsTick, healthTick, paused, togglePause } = useLiveGraph();
   const [err, setErr] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"brain" | "tree">("brain");
+  const [busy, setBusy] = useState(false);
+  const loading = busy || !!status?.scanning;
+  const [view, setView] = useState<"brain" | "tree" | "charts" | "health">("brain");
   const [mode, setMode] = useState<"3d" | "2d">("3d");
   const [notice, setNotice] = useState("");
   const [f, setF] = useState<Filters>(defaultFilters());
@@ -23,16 +27,10 @@ export default function App() {
   const [hover, setHover] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [theme, setTheme] = useState<"dark" | "light">(() => (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
-  const [updated, setUpdated] = useState<Date | null>(null);
-
-  const load = useCallback(async (doRescan = false) => {
-    setLoading(true);
-    try {
-      if (doRescan) await rescan();
-      setG(await getGraph()); setErr(""); setUpdated(new Date());
-    } catch (e) { setErr(String(e)); } finally { setLoading(false); }
+  const doRescan = useCallback(async () => {
+    setBusy(true);
+    try { await rescan(); setErr(""); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }, []);
-  useEffect(() => { load(); }, [load]);
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => { if (!webglOk()) { setMode("2d"); setNotice("WebGL is unavailable, so the 2D view is shown."); } }, []);
 
@@ -53,10 +51,14 @@ export default function App() {
         <nav>
           <button className={view === "brain" ? "on" : ""} onClick={() => setView("brain")}>Brain</button>
           <button className={view === "tree" ? "on" : ""} onClick={() => setView("tree")}>Tree</button>
+          <button className={view === "charts" ? "on" : ""} onClick={() => setView("charts")}>Charts</button>
+          <button className={view === "health" ? "on" : ""} onClick={() => setView("health")}>Health</button>
         </nav>
         <div className="spacer" />
-        <span className="muted" title="Phase 1: snapshot, no live refresh yet">{updated ? `snapshot ${updated.toLocaleTimeString()}` : ""}</span>
-        <button onClick={() => load(true)} disabled={loading}>{loading ? "Scanning…" : "Rescan"}</button>
+        <span className={"live " + live} role="status" aria-live="polite"><i />{live === "live" ? "Live" : live === "paused" ? "Paused" : "Reconnecting…"}</span>
+        <span className="muted">{updated ? `updated ${updated.toLocaleTimeString()}` : ""}</span>
+        <button onClick={togglePause} aria-pressed={paused}>{paused ? "Resume" : "Pause"}</button>
+        <button onClick={doRescan} disabled={loading}>{loading ? "Scanning…" : "Rescan"}</button>
         <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Toggle theme">{theme === "dark" ? "☀" : "☾"}</button>
       </header>
 
@@ -77,17 +79,23 @@ export default function App() {
 
       {(notice || tooBig) && <div className="notice" role="status">{tooBig ? `More than ${NODE_CAP_3D} nodes, so the 2D view is shown. Filter to use 3D.` : notice}
         {notice && <button onClick={() => setNotice("")}>dismiss</button>}</div>}
+      {status?.scanning && status.total > 0 && <div className="notice" role="status">Scanning transcripts… {status.done}/{status.total} files (first run only; later scans read just new lines)</div>}
+      {status?.error && <div className="notice warn" role="alert">Last refresh failed: {status.error}</div>}
       {err && <div className="notice warn" role="alert">Could not load data: {err}</div>}
 
       <main>
         <section className="stage">
           {view === "tree" ? (
             <TreeView selected={selected} onSelect={select} seq={g.seq} />
+          ) : view === "charts" ? (
+            <Suspense fallback={<div className="empty">Loading charts…</div>}><Charts tick={metricsTick + g.seq} onSelect={select} /></Suspense>
+          ) : view === "health" ? (
+            <Health tick={healthTick + metricsTick} onOpen={(id) => { setView("brain"); select(id); }} />
           ) : filtered.nodes.length === 0 ? (
             <div className="empty">{loading ? "Scanning your Claude memory…" : g.nodes.length ? "No nodes match the filters." : "No memory notes found yet. Claude writes them under ~/.claude/projects/<project>/memory/."}</div>
           ) : eff === "3d" ? (
             <Suspense fallback={<div className="empty">Loading 3D scene…</div>}>
-              <Graph3D nodes={filtered.nodes} edges={filtered.edges} selected={selected} hover={hover} focusTick={focusTick}
+              <Graph3D nodes={filtered.nodes} edges={filtered.edges} selected={selected} hover={hover} focusTick={focusTick} flares={flares}
                 onSelect={select} onHover={setHover} reduceMotion={reduceMotion}
                 onLowFps={() => { setMode("2d"); setNotice("Frame rate stayed below ~25 FPS, so the 2D view is shown."); }}
                 onContextLost={() => { setMode("2d"); setNotice("The WebGL context was lost, so the 2D view is shown."); }} />

@@ -9,7 +9,7 @@ import { colorOf, mergeNodes, neighbours } from "./model";
 interface Props {
   nodes: GNode[]; edges: GEdge[]; selected: string | null; hover: string | null; focusTick: number;
   onSelect: (id: string | null) => void; onHover: (id: string | null) => void;
-  onLowFps: () => void; onContextLost: () => void; reduceMotion: boolean;
+  flares: Set<string>; onLowFps: () => void; onContextLost: () => void; reduceMotion: boolean;
 }
 
 export default function Graph3D(p: Props) {
@@ -22,7 +22,13 @@ export default function Graph3D(p: Props) {
   cb.current = p;
 
   const data = useMemo(() => {
+    // Live update: pin nodes that already have a position so only NEW nodes move, then release the pins.
+    const existing = [...store.current.values()].filter((n) => n.x != null && n.fx == null);
+    if (store.current.size) existing.forEach((n) => { n.fx = n.x; n.fy = n.y; n.fz = n.z; n._pin = true; });
     const ns = mergeNodes(store.current, p.nodes);
+    if (existing.length) {
+      setTimeout(() => store.current.forEach((n) => { if (n._pin) { n.fx = n.fy = n.fz = undefined; delete n._pin; } }), 1800);
+    }
     const links = p.edges.map((e) => ({ source: e.src, target: e.dst, kind: e.kind, explicit: e.explicit, weight: e.weight }));
     return { nodes: ns, links };
   }, [p.nodes, p.edges]);
@@ -107,6 +113,9 @@ export default function Graph3D(p: Props) {
     g.add(new THREE.Mesh(new THREE.SphereGeometry(rad, 16, 16), mat));
     if (recent && !dim && !p.reduceMotion) {
       g.add(new THREE.Mesh(new THREE.SphereGeometry(rad * 1.6, 12, 12), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.18 })));
+    }
+    if (p.flares.has(n.id) && !p.reduceMotion) { // "firing" flare for freshly changed nodes
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(rad * 2.6, 14, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 })));
     }
     const showLabel = !dim && (n.id === p.selected || n.id === p.hover || n.kind === "project" || n.degree >= 3 || (lit && lit.has(n.id)));
     if (showLabel) {

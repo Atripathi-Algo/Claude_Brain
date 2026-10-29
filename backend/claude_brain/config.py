@@ -1,5 +1,6 @@
 """Config + app-data folder. The ONLY place the app writes (read-only mode, Phase 1/2)."""
 import json
+import os
 from pathlib import Path
 
 APP_DIR = Path.home() / ".claude-brain"
@@ -22,6 +23,8 @@ def load():
         cfg.update(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         pass
+    if os.environ.get("CLAUDE_BRAIN_HOME"):  # test/demo override: point at a synthetic claude home
+        cfg["claude_home"] = os.environ["CLAUDE_BRAIN_HOME"]
     return cfg
 
 
