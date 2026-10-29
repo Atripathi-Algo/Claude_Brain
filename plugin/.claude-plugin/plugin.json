@@ -1,0 +1,6 @@
+{
+  "name": "claude-brain-memory-init",
+  "version": "0.1.0",
+  "description": "SessionStart hook that creates the project memory folder and an empty MEMORY.md index if they are missing. Nothing else.",
+  "license": "MIT"
+}

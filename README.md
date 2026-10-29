@@ -22,7 +22,7 @@ First scan reads all transcripts once (~40 s for ~1 GB); later scans only read a
 A watchdog observer watches `~/.claude/projects` and `CLAUDE.md`. Note edits are debounced (0.5 s), transcript appends are throttled (8 s), and a full reconcile runs every 5 min plus the Rescan button. Each refresh diffs the graph and pushes deltas (`node_upsert`, `node_delete`, `edge_upsert`, `edge_delete`, `metrics_changed`, `health_changed`) over SSE at `/api/events` with a monotonic sequence number. The client resyncs from `/api/graph` on a gap or reconnect, keeps existing nodes pinned while new ones settle, and shows Live / Reconnecting / Paused.
 
 ## Status
-Phase 1 (scanner, graph, 3D/2D Brain, Tree, inspector, filters) and Phase 2 (live refresh, token charts, treemap, health view, FTS5 search at `/api/search`). Phase 3 (opt-in write-back: edit with live diff, create, merge, trash, index add/remove, undo). Not yet: plugin (Phase 4), "mark stale" action, editing settings other than write mode.
+Phase 1 (scanner, graph, 3D/2D Brain, Tree, inspector, filters) and Phase 2 (live refresh, token charts, treemap, health view, FTS5 search at `/api/search`). Phase 3 (opt-in write-back: edit with live diff, create, merge, trash, index add/remove, undo). Phase 4: optional `plugin/` (SessionStart hook that only creates a missing `memory/` + `MEMORY.md`; see `plugin/README.md`). Not yet: "mark stale" action, editing settings other than write mode.
 Known limits: project label comes from the transcript `cwd`; inferred edges are TF-IDF similarity and same-session co-reads; token usage is read from transcript `usage` records (de-duplicated per message id, not independently verified against billing); memory growth uses file mtime.
 
 ## Tests
