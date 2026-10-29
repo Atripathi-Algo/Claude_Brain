@@ -18,7 +18,7 @@ function Chart({ title, option, csv, note }: { title: string; option: any; csv?:
   }, []);
   useEffect(() => {
     chart.current?.setOption({ backgroundColor: "transparent", textStyle: { color: css("--text") },
-      grid: { left: 56, right: 24, top: 36, bottom: 56 }, tooltip: { trigger: "axis" }, legend: { top: 0, textStyle: { color: css("--muted") } }, ...option }, true);
+      grid: { left: 56, right: 24, top: 36, bottom: 56 }, tooltip: { trigger: "axis" }, legend: { top: 0, show: (option.series?.length ?? 0) <= 8, textStyle: { color: css("--muted") } }, ...option }, true);
   }, [option]);
   const download = (href: string, name: string) => { const a = document.createElement("a"); a.href = href; a.download = name; a.click(); };
   return (

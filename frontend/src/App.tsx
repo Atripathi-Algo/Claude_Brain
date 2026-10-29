@@ -99,7 +99,7 @@ export default function App() {
 
       {(notice || tooBig) && <div className="notice" role="status">{tooBig ? `More than ${NODE_CAP_3D} nodes, so the 2D view is shown. Filter to use 3D.` : notice}
         {notice && <button onClick={() => setNotice("")}>dismiss</button>}</div>}
-      {status?.scanning && status.total > 0 && <div className="notice" role="status">Scanning transcripts… {status.done}/{status.total} files (first run only; later scans read just new lines)</div>}
+      {status?.scanning && status.total > 0 && status.done < status.total && <div className="notice" role="status">Scanning transcripts… {status.done}/{status.total} files (first run only; later scans read just new lines)</div>}
       {status?.error && <div className="notice warn" role="alert">Last refresh failed: {status.error}</div>}
       {err && <div className="notice warn" role="alert">Could not load data: {err}</div>}
 
