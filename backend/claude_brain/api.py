@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import cache as cache_mod
 from . import config, metrics
 from .events import Service, Watcher, sse
 from .graph import Brain
@@ -28,7 +29,7 @@ def create_app(brain=None, auto_scan=True, watch=None):
     brain = brain or Brain(discover=True)
     svc = Service(brain)
     app.state.brain, app.state.svc = brain, svc
-    watcher = Watcher(svc, config.load().get("refresh_minutes", 5))
+    watcher = Watcher(svc)
     app.state.watcher = watcher
     watch = auto_scan if watch is None else watch
 
@@ -100,6 +101,10 @@ def create_app(brain=None, auto_scan=True, watch=None):
     def settings():
         return config.load()
 
+    @app.get("/api/settings/schema")
+    def settings_schema():
+        return config.describe()
+
     @app.put("/api/settings")
     def put_settings(body: dict):
         try:
@@ -148,6 +153,21 @@ def create_app(brain=None, auto_scan=True, watch=None):
     @app.post("/api/undo")
     def undo():
         return writer.undo()
+
+    # ---- cache panel: list and (after explicit confirmation) delete the app's own cached data ----
+    @app.exception_handler(cache_mod.CacheError)
+    async def _cache_error(request: Request, exc: cache_mod.CacheError):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status)
+
+    @app.get("/api/cache")
+    def cache_list():
+        return {"dir": str(config.APP_DIR), "items": cache_mod.items(brain, writer)}
+
+    @app.post("/api/cache/clear")
+    def cache_clear(body: dict):
+        if body.get("confirm") is not True:
+            raise HTTPException(400, "Deleting cache requires confirm: true.")
+        return cache_mod.clear(brain, svc, writer, list(body.get("ids", [])))
 
     @app.get("/api/history")
     def history():

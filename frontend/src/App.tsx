@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { rescan } from "./api";
 import { useLiveGraph } from "./live";
 import Health from "./Health";
-import { call, CreateDialog, SettingsDialog } from "./WritePanel";
+import { call, CacheDialog, CreateDialog, SettingsDialog } from "./WritePanel";
 import { applyFilters, defaultFilters, TYPE_COLOR, webglOk, type Filters } from "./model";
 import Inspector from "./Inspector";
 import TreeView from "./TreeView";
@@ -11,9 +11,6 @@ import Graph2D from "./Graph2D";
 const Graph3D = lazy(() => import("./Graph3D"));
 const Charts = lazy(() => import("./Charts"));
 const reduceMotion = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-const NODE_CAP_3D = 3000;
-const KINDS = ["project", "memory", "index", "claude_md", "ghost"];
-const TYPES = ["user", "feedback", "project", "reference"];
 
 export default function App() {
   const { g, state: live, status, updated, flares, metricsTick, healthTick, paused, togglePause } = useLiveGraph();
@@ -29,7 +26,7 @@ export default function App() {
   const [focusTick, setFocusTick] = useState(0);
   const [theme, setTheme] = useState<"dark" | "light">(() => (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
   const [settings, setSettings] = useState<any>({ read_only: true });
-  const [dlg, setDlg] = useState<null | "settings" | { create: { name?: string; project?: string } }>(null);
+  const [dlg, setDlg] = useState<null | "settings" | "cache" | { create: { name?: string; project?: string } }>(null);
   const [toast, setToast] = useState("");
   const [lastOp, setLastOp] = useState("");
   const [version, setVersion] = useState(0);
@@ -54,7 +51,10 @@ export default function App() {
   const filtered = useMemo(() => applyFilters(g, f), [g, f]);
   const labels = useMemo(() => new Map(g.nodes.map((n) => [n.id, n.label])), [g]);
   const projects = g.nodes.filter((n) => n.kind === "project");
-  const tooBig = filtered.nodes.length > NODE_CAP_3D;
+  const nodeCap = settings.node_cap_3d ?? Infinity;
+  const tooBig = filtered.nodes.length > nodeCap;
+  const KINDS = [...new Set(g.nodes.map((n) => n.kind))].sort();
+  const TYPES = [...new Set(g.nodes.filter((n) => n.kind === "memory").map((n) => n.type))].sort();
   const eff = tooBig ? "2d" : mode;
   const match = f.q ? g.nodes.find((n) => n.label.toLowerCase().includes(f.q.toLowerCase())) : null;
 
@@ -76,6 +76,7 @@ export default function App() {
         <span className="muted">{updated ? `updated ${updated.toLocaleTimeString()}` : ""}</span>
         {writeOn && <span className="badge" title="Write mode is ON">write mode</span>}
         {writeOn && lastOp && <button onClick={undo} title={`Undo: ${lastOp}`}>Undo</button>}
+        <button onClick={() => setDlg("cache")}>Cache</button>
         <button onClick={() => setDlg("settings")}>Settings</button>
         <button onClick={togglePause} aria-pressed={paused}>{paused ? "Resume" : "Pause"}</button>
         <button onClick={doRescan} disabled={loading}>{loading ? "Scanning…" : "Rescan"}</button>
@@ -102,7 +103,7 @@ export default function App() {
         {view === "brain" && <button onClick={() => setMode(eff === "3d" ? "2d" : "3d")} disabled={tooBig}>{eff === "3d" ? "Switch to 2D" : "Switch to 3D"}</button>}
       </div>
 
-      {(notice || tooBig) && <div className="notice" role="status">{tooBig ? `More than ${NODE_CAP_3D} nodes, so the 2D view is shown. Filter to use 3D.` : notice}
+      {(notice || tooBig) && <div className="notice" role="status">{tooBig ? `More than ${nodeCap} nodes, so the 2D view is shown. Filter to use 3D.` : notice}
         {notice && <button onClick={() => setNotice("")}>dismiss</button>}</div>}
       {status?.scanning && status.total > 0 && status.done < status.total && <div className="notice" role="status">Scanning transcripts… {status.done}/{status.total} files (first run only; later scans read just new lines)</div>}
       {status?.error && <div className="notice warn" role="alert">Last refresh failed: {status.error}</div>}
@@ -121,9 +122,9 @@ export default function App() {
             <div className="empty">{loading ? "Scanning your Claude memory…" : g.nodes.length ? "No nodes match the filters." : "No memory notes found yet. Claude writes them under ~/.claude/projects/<project>/memory/."}</div>
           ) : eff === "3d" ? (
             <Suspense fallback={<div className="empty">Loading 3D scene…</div>}>
-              <Graph3D nodes={filtered.nodes} edges={filtered.edges} selected={selected} hover={hover} focusTick={focusTick} flares={flares}
+              <Graph3D fpsFloor={settings.fps_floor} fpsSeconds={settings.fps_floor_seconds} nodes={filtered.nodes} edges={filtered.edges} selected={selected} hover={hover} focusTick={focusTick} flares={flares}
                 onSelect={select} onHover={setHover} reduceMotion={reduceMotion}
-                onLowFps={() => { setMode("2d"); setNotice("Frame rate stayed below ~25 FPS, so the 2D view is shown."); }}
+                onLowFps={() => { setMode("2d"); setNotice(`Frame rate stayed below ${settings.fps_floor} FPS, so the 2D view is shown.`); }}
                 onContextLost={() => { setMode("2d"); setNotice("The WebGL context was lost, so the 2D view is shown."); }} />
             </Suspense>
           ) : (
@@ -141,7 +142,8 @@ export default function App() {
       </main>
       {toast && <div className="toast" role="status">{toast}</div>}
       {dlg === "settings" && <SettingsDialog settings={settings} onClose={() => setDlg(null)} onChange={loadSettings} />}
-      {dlg && dlg !== "settings" && <CreateDialog projects={projects} initial={dlg.create} onClose={(m) => { setDlg(null); wrote(m); }} />}
+      {dlg === "cache" && <CacheDialog onClose={() => setDlg(null)} onCleared={(m) => { setDlg(null); setToast(m); setVersion((v) => v + 1); }} />}
+      {dlg && typeof dlg === "object" && <CreateDialog projects={projects} initial={dlg.create} onClose={(m) => { setDlg(null); wrote(m); }} />}
     </div>
   );
 }

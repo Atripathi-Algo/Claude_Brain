@@ -9,7 +9,7 @@ import { colorOf, mergeNodes, neighbours } from "./model";
 interface Props {
   nodes: GNode[]; edges: GEdge[]; selected: string | null; hover: string | null; focusTick: number;
   onSelect: (id: string | null) => void; onHover: (id: string | null) => void;
-  flares: Set<string>; onLowFps: () => void; onContextLost: () => void; reduceMotion: boolean;
+  fpsFloor: number; fpsSeconds: number; flares: Set<string>; onLowFps: () => void; onContextLost: () => void; reduceMotion: boolean;
 }
 
 export default function Graph3D(p: Props) {
@@ -84,8 +84,8 @@ export default function Graph3D(p: Props) {
     const tick = (t: number) => {
       frames++;
       if (t - last >= 1000) {
-        slow = frames < 25 && !document.hidden ? slow + 1 : 0; frames = 0; last = t;
-        if (slow >= 6) { cb.current.onLowFps(); return; }
+        slow = frames < cb.current.fpsFloor && !document.hidden ? slow + 1 : 0; frames = 0; last = t;
+        if (slow >= cb.current.fpsSeconds) { cb.current.onLowFps(); return; }
       }
       raf = requestAnimationFrame(tick);
     };

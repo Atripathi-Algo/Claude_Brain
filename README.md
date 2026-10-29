@@ -15,6 +15,10 @@ First scan reads all transcripts once (~40 s for ~1 GB); later scans only read a
 ## Which projects appear
 Every folder in `~/.claude/projects` becomes a project node, even with no notes (marked "no notes"), plus folders on disk that contain a `CLAUDE.md` or `.claude` folder but that Claude has not stored anything for (marked `not_in_claude_store`). Disk discovery is read-only, scans `D:\`, `E:\` (if present) and your home folder up to 3 levels deep, skips `node_modules`/`.git`/`AppData` and similar, and is cached for 5 minutes. Override the roots with `project_roots` in `~/.claude-brain/config.json`. Filter by drive and hide empty projects in the UI.
 
+## Settings and cache
+Nothing is hard-coded: thresholds, delays, folder and file names (`memory`, `MEMORY.md`, `CLAUDE.md`), index caps, scan roots/depth/skip list, protected folder names, node cap and FPS floor are all in `backend/claude_brain/config.py` (`SCHEMA`, with descriptions) and can be overridden in `~/.claude-brain/config.json` or from Settings > All settings. The only fixed values are security invariants (bind to 127.0.0.1, Host/Origin checks).
+The **Cache** button lists what the app stores (transcript scan data, discovery cache, search index, undo backups) with sizes, and deletes the items you tick only after a second confirmation. It never touches your notes, transcripts or Claude settings.
+
 ## Privacy model
 - Binds to 127.0.0.1; `Host`/`Origin` headers are validated (403 otherwise).
 - Write mode is OFF by default and the server refuses every write until you turn it on in Settings. With it off, nothing outside `%USERPROFILE%\.claude-brain\` is ever written.

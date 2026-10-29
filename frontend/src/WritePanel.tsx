@@ -93,12 +93,76 @@ export function SettingsDialog({ settings, onClose, onChange }: { settings: any;
     <Modal title="Settings" onClose={onClose}>
       <label className="switch"><input type="checkbox" checked={!settings.read_only} onChange={toggle} /> Write mode <b className={settings.read_only ? "" : "warn"}>{settings.read_only ? "OFF (read-only)" : "ON"}</b></label>
       <p className="muted small">Off by default. When off, the server refuses every write.</p>
-      <dl className="kv">
-        <dt>Claude home</dt><dd>{settings.claude_home}</dd>
-        <dt>Reconcile every</dt><dd>{settings.refresh_minutes} min</dd>
-        <dt>3D node cap</dt><dd>{settings.node_cap_3d}</dd>
-        <dt>Similarity threshold</dt><dd>{settings.similarity_threshold}</dd>
-      </dl>
+      <p className="muted small">Claude home: {settings.claude_home}</p>
+      <SettingsList settings={settings} onChange={onChange} onError={setErr} />
+      {err && <p className="warn" role="alert">{err}</p>}
+    </Modal>
+  );
+}
+
+/** Every tunable, straight from the server's schema: nothing here is hard-coded in the UI. */
+function SettingsList({ settings, onChange, onError }: { settings: any; onChange: () => void; onError: (m: string) => void }) {
+  const [schema, setSchema] = useState<any[]>([]);
+  useEffect(() => { call("/api/settings/schema").then(setSchema).catch((e) => onError(e.message)); }, [settings]);
+  const save = async (key: string, value: unknown) => {
+    try { await call("/api/settings", "PUT", { [key]: value }); onError(""); onChange(); } catch (e: any) { onError(e.message); }
+  };
+  return (
+    <details className="all-settings">
+      <summary>All settings ({schema.length})</summary>
+      {schema.filter((s) => s.key !== "read_only").map((s) => (
+        <label key={s.key} className="setting" title={`default: ${JSON.stringify(s.default)}`}>
+          <span>{s.key}<small className="muted"> — {s.description}</small></span>
+          {s.type === "bool" ? <input type="checkbox" checked={!!s.value} onChange={(e) => save(s.key, e.target.checked)} />
+            : s.type === "list" ? <textarea defaultValue={(s.value as string[]).join("\n")} rows={Math.min(5, Math.max(2, s.value.length))}
+                onBlur={(e) => { const v = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); if (JSON.stringify(v) !== JSON.stringify(s.value)) save(s.key, v); }} />
+            : <input defaultValue={String(s.value)} type={s.type === "str" ? "text" : "number"} step="any"
+                onBlur={(e) => { const v = s.type === "str" ? e.target.value : Number(e.target.value); if (v !== s.value && (s.type === "str" || !Number.isNaN(v))) save(s.key, v); }} />}
+        </label>
+      ))}
+    </details>
+  );
+}
+
+const fmt = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+
+/** Shows what the app caches and deletes the chosen items only after an explicit confirmation step. */
+export function CacheDialog({ onClose, onCleared }: { onClose: () => void; onCleared: (msg: string) => void }) {
+  const [data, setData] = useState<{ dir: string; items: any[] } | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [err, setErr] = useState("");
+  const load = () => call("/api/cache").then(setData).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []);
+  const chosen = data?.items.filter((i) => sel.has(i.id)) ?? [];
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const doClear = async () => {
+    try { const r = await call("/api/cache/clear", "POST", { ids: [...sel], confirm: true }); onCleared(`Deleted: ${r.cleared.join(", ")}${r.rescanning ? " (rescanning in the background)" : ""}`); }
+    catch (e: any) { setErr(e.message); setConfirming(false); }
+  };
+  return (
+    <Modal title={confirming ? "Confirm deletion" : "Cache"} onClose={onClose}>
+      {!data ? <p className="muted">Loading…</p> : confirming ? (
+        <>
+          <p>This will delete:</p>
+          <ul>{chosen.map((i) => <li key={i.id}><b>{i.label}</b> ({fmt(i.bytes)}){i.warning && <div className="warn small">{i.warning}</div>}</li>)}</ul>
+          <p className="muted small">Your Claude notes, transcripts and settings are never touched.</p>
+          <div className="row-btn"><button className="on danger" onClick={doClear}>Yes, delete</button><button onClick={() => setConfirming(false)}>Go back</button></div>
+        </>
+      ) : (
+        <>
+          <p className="muted small">App data folder: {data.dir}</p>
+          {data.items.map((i) => (
+            <label key={i.id} className="cache-item">
+              <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
+              <span><b>{i.label}</b> <span className="muted">{i.persistent ? `${fmt(i.bytes)} · ${i.files} file(s)` : `in memory · ${i.files} entr${i.files === 1 ? "y" : "ies"}`}</span>
+                <div className="muted small">{i.description}</div>
+                {i.warning && <div className="warn small">{i.warning}</div>}</span>
+            </label>
+          ))}
+          <div className="row-btn"><button className="on" disabled={!sel.size} onClick={() => setConfirming(true)}>Delete selected…</button><button onClick={load}>Refresh</button></div>
+        </>
+      )}
       {err && <p className="warn" role="alert">{err}</p>}
     </Modal>
   );

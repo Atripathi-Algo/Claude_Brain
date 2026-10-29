@@ -2,9 +2,15 @@
 import json
 from pathlib import Path
 
+from . import config
+
 STATE_VERSION = 2
-MARK = b"\\\\memory\\\\"  # JSON-escaped "\memory\" (Windows)
-MARK2 = b"/memory/"
+
+
+def _markers():
+    """Byte patterns that cheaply pre-filter transcript lines mentioning the memory folder (JSON-escaped on Windows)."""
+    m = config.load()["memory_dir"]
+    return ("\\\\" + m + "\\\\").encode(), ("/" + m + "/").encode(), m.lower()
 
 
 def _norm(p):
@@ -41,6 +47,7 @@ def scan(projects_dir, state, progress=None):
     sessions = state.setdefault("sessions", {})
     usage = state.setdefault("usage", {})
     changed = False
+    mark, mark2, mem_name = _markers()
     files = list(Path(projects_dir).glob("*/*.jsonl"))
     for i, jf in enumerate(files):
         if progress:
@@ -68,9 +75,9 @@ def scan(projects_dir, state, progress=None):
                         fh.seek(start)
                         break
                     has_use = b'"usage"' in raw and b'"assistant"' in raw
-                    has_mem = (MARK in raw or MARK2 in raw) and b'"tool_use"' in raw
+                    has_mem = (mark in raw or mark2 in raw) and b'"tool_use"' in raw
                     if has_use or has_mem:
-                        _handle(raw, reads, sessions, pending, has_mem)
+                        _handle(raw, reads, sessions, pending, has_mem, mem_name)
                 off = fh.tell()
         except OSError:
             continue
@@ -88,7 +95,7 @@ def scan(projects_dir, state, progress=None):
     return changed
 
 
-def _handle(raw, reads, sessions, pending, has_mem):
+def _handle(raw, reads, sessions, pending, has_mem, mem_name):
     try:
         o = json.loads(raw)
     except ValueError:
@@ -108,7 +115,7 @@ def _handle(raw, reads, sessions, pending, has_mem):
     for b in content:
         if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Read":
             fp = (b.get("input") or {}).get("file_path")
-            if isinstance(fp, str) and "memory" in fp.lower() and fp.lower().endswith(".md"):
+            if isinstance(fp, str) and mem_name in fp.lower() and fp.lower().endswith(".md"):
                 p = _norm(fp)
                 r = reads.setdefault(p, {"count": 0, "last": ""})
                 r["count"] += 1

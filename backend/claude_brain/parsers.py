@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from . import config
+
 _FM = re.compile(r"\A﻿?---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
 _LINK = re.compile(r"\[\[([^\[\]\n|]+?)(?:\|[^\]\n]*)?\]\]")
 _INDEX = re.compile(r"^\s*[-*]\s*\[([^\]]*)\]\(([^)]+)\)\s*(?:[—–-]+\s*(.*))?$")
@@ -65,11 +67,14 @@ def parse_note(path):
 
 def _looks_like_path(s):
     s = s.split(":")[0] if re.search(r":\d+$", s) else s
-    return bool(re.search(r"[\/]", s) and re.search(r"\.\w{1,6}$", s) and " " not in s)
+    return bool(re.search(r"[\\/]", s) and re.search(r"\.\w{1,6}$", s) and " " not in s)
 
 
-def parse_index(text):
-    """-> (entries[{title,file,hook}], total_lines, bytes, truncated)"""
+def parse_index(text, line_cap=None, byte_cap=None):
+    """-> (entries[{title,file,hook}], total_lines, bytes, truncated). Caps default to the configured load limits."""
+    cfg = config.load()
+    line_cap = cfg["index_line_cap"] if line_cap is None else line_cap
+    byte_cap = cfg["index_byte_cap"] if byte_cap is None else byte_cap
     entries = []
     lines = text.split("\n")
     for ln in lines:
@@ -77,4 +82,4 @@ def parse_index(text):
         if m:
             entries.append({"title": m.group(1), "file": m.group(2).strip(), "hook": (m.group(3) or "").strip()})
     size = len(text.encode("utf-8"))
-    return entries, len(lines), size, (len(lines) > 200 or size > 25 * 1024)
+    return entries, len(lines), size, (len(lines) > line_cap or size > byte_cap)

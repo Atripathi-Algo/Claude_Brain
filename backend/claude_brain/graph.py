@@ -14,7 +14,7 @@ from .redact import redact
 
 
 def est_tokens(n_chars):
-    return max(0, n_chars // 4)  # estimate: chars/4
+    return max(0, n_chars // max(1, config.load()["chars_per_token"]))  # an estimate, never an exact count
 
 
 def _ghost(name):
@@ -77,6 +77,8 @@ class Brain:
             self._build()
 
     def _build(self):
+        cfg = config.load()
+        mem_dir, index_file, project_file = cfg["memory_dir"], cfg["index_file"], cfg["project_file"]
         pdir = self.home / "projects"
         reads = self.state.get("reads", {})
         self.nodes, self.edges, self.notes, self.indexes = {}, [], {}, {}
@@ -86,14 +88,14 @@ class Brain:
             self.nodes[n["id"]] = n
             return n
 
-        cm = self.home / "CLAUDE.md"
+        cm = self.home / project_file
         if cm.is_file():
             t = parsers.read_text(cm)
-            add(self._node("claude_md:user", "claude_md", "User CLAUDE.md", None, "instructions", cm, t))
+            add(self._node("claude_md:user", "claude_md", "User " + project_file, None, "instructions", cm, t))
 
         if pdir.is_dir():
             for pd in sorted(p for p in pdir.iterdir() if p.is_dir()):
-                mem = pd / "memory"
+                mem = pd / mem_dir
                 files = [f for f in mem.glob("*.md") if f.is_file()] if mem.is_dir() else []
                 pid = "proj:" + pd.name
                 if pd.name not in self._cwd:  # cached: reading transcript heads on every refresh is wasteful
@@ -104,18 +106,18 @@ class Brain:
                      "type": "project", "path": cwd or str(pd), "mtime": 0, "size": 0, "tokens_est": 0,
                      "last_read_at": None, "read_count": 0, "drive": m.group(1).upper() if m else None,
                      "flags": [] if files else ["no_memory"]})
-                pcm = Path(cwd) / "CLAUDE.md" if cwd else None  # the project's own CLAUDE.md, if it still exists
+                pcm = Path(cwd) / project_file if cwd else None  # the project's own instructions file, if it still exists
                 if pcm and pcm.is_file():
                     cid = f"claude_md:{pd.name}"
-                    add(self._node(cid, "claude_md", "CLAUDE.md", pid, "instructions", pcm, parsers.read_text(pcm)))
+                    add(self._node(cid, "claude_md", project_file, pid, "instructions", pcm, parsers.read_text(pcm)))
                     self.edges.append(self._edge(cid, pid, "in_project", True))
                 listed = {}
                 iid = f"idx:{pd.name}"
                 for f in sorted(files):
                     t = parsers.read_text(f)
-                    if f.name == "MEMORY.md":
+                    if f.name == index_file:
                         entries, nlines, size, trunc = parsers.parse_index(t)
-                        n = add(self._node(iid, "index", "MEMORY.md", pid, "index", f, t))
+                        n = add(self._node(iid, "index", index_file, pid, "index", f, t))
                         if trunc:
                             n["flags"].append("index_over_cap")
                         self.indexes[pid] = {"entries": entries, "lines": nlines, "bytes": size, "truncated": trunc}
@@ -127,7 +129,7 @@ class Brain:
                     n = add(self._node(nid, "memory", note["name"], pid, note["type"], f, note["text"]))
                     n["description"] = note["description"]
                     n["flags"] += [w.replace(" ", "_") for w in note["warnings"]]
-                    if len(note["text"]) > 8000:
+                    if len(note["text"]) > cfg["oversized_chars"]:
                         n["flags"].append("oversized")
                     r = reads.get(transcripts._norm(f))
                     if r:
@@ -136,7 +138,7 @@ class Brain:
                     self.edges.append(self._edge(nid, pid, "in_project", True))
                     by_name.setdefault((pid, note["name"]), nid)
                     by_name.setdefault((None, note["name"]), nid)
-                names = {f.name for f in files} - {"MEMORY.md"}
+                names = {f.name for f in files} - {index_file}
                 if iid in self.nodes:
                     for fname in listed:
                         nid = f"mem:{pd.name}/{fname}"
@@ -150,7 +152,7 @@ class Brain:
                 for fname in orphans:
                     self.nodes[f"mem:{pd.name}/{fname}"]["flags"].append("orphan")
 
-        if self.discover:  # project folders on disk that Claude has not (yet) stored anything for
+        if self.discover and cfg["discover_projects"]:  # project folders on disk that Claude has not (yet) stored anything for
             known = {str(n["path"]).lower().rstrip("\\/") for n in self.nodes.values() if n["kind"] == "project"}
             for d in self._disk_projects():
                 enc = re.sub(r"[^A-Za-z0-9]", "-", str(d))
@@ -161,10 +163,10 @@ class Brain:
                 add({"id": pid, "kind": "project", "label": d.name, "project": pid, "type": "project", "path": str(d),
                      "mtime": 0, "size": 0, "tokens_est": 0, "last_read_at": None, "read_count": 0,
                      "drive": m.group(1).upper() if m else None, "flags": ["no_memory", "not_in_claude_store"]})
-                pcm = d / "CLAUDE.md"
+                pcm = d / project_file
                 if pcm.is_file():
                     cid = f"claude_md:{enc}"
-                    add(self._node(cid, "claude_md", "CLAUDE.md", pid, "instructions", pcm, parsers.read_text(pcm)))
+                    add(self._node(cid, "claude_md", project_file, pid, "instructions", pcm, parsers.read_text(pcm)))
                     self.edges.append(self._edge(cid, pid, "in_project", True))
 
         for nid, note in self.notes.items():
@@ -181,13 +183,13 @@ class Brain:
         co = {}
         for paths in self.state.get("sessions", {}).values():
             ids = sorted({path2id[p] for p in paths if p in path2id})
-            if 1 < len(ids) <= 12:
+            if 1 < len(ids) <= cfg["co_read_max_notes"]:
                 for a, b in itertools.combinations(ids, 2):
                     co[(a, b)] = co.get((a, b), 0) + 1
         for (a, b), w in co.items():
             self.edges.append(self._edge(a, b, "co_read", False, w))
 
-        self._similar(config.load().get("similarity_threshold", 0.6))
+        self._similar(cfg["similarity_threshold"], cfg["similar_top_k"], cfg["duplicate_threshold"])
 
         seen, out = set(), []
         for e in self.edges:
@@ -210,16 +212,17 @@ class Brain:
                 n["tokens_est"] = sum(m["tokens_est"] for m in self.nodes.values()
                                       if m["project"] == pid and m["kind"] in ("memory", "index", "claude_md"))
 
-    def _disk_projects(self, ttl=300):
+    def _disk_projects(self):
         """Disk scan is cached for `ttl` seconds so frequent refreshes stay cheap."""
+        cfg = config.load()
         found, at = self._disk
-        if time.time() - at > ttl:
-            roots = [Path(r) for r in config.load().get("project_roots") or discovery.default_roots()]
-            found = discovery.discover(roots)
+        if time.time() - at > cfg["discover_cache_seconds"]:
+            roots = [Path(r) for r in cfg["project_roots"]] or discovery.default_roots()
+            found = discovery.discover(roots, cfg["discover_depth"], cfg["discover_limit"], set(cfg["discover_skip"]))
             self._disk = (found, time.time())
         return found
 
-    def _similar(self, threshold, topk=3):
+    def _similar(self, threshold, topk, duplicate):
         ids = list(self.notes)
         if len(ids) < 2:
             return
@@ -235,7 +238,7 @@ class Brain:
             for s, b in cands:
                 if s >= threshold and a < b:
                     self.edges.append(self._edge(ids[a], ids[b], "similar", False, round(float(s), 3)))
-                    if s >= 0.8:
+                    if s >= duplicate:
                         for i in (ids[a], ids[b]):
                             if "duplicate_candidate" not in self.nodes[i]["flags"]:
                                 self.nodes[i]["flags"].append("duplicate_candidate")

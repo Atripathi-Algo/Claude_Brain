@@ -15,8 +15,6 @@ from pathlib import Path
 from . import config, parsers
 from .redact import redact
 
-FROZEN = "sales-insight-demo"
-MAX_BYTES = 200 * 1024
 _LINK = re.compile(r"\[\[([^\[\]\n|]+?)((?:\|[^\]\n]*)?)\]\]")
 _FM = re.compile(r"\A﻿?---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
 
@@ -53,13 +51,14 @@ class Writer:
         pdir = (self.brain.home / "projects")
         if not pdir.is_dir():
             return []
-        return [(d / "memory").resolve() for d in pdir.iterdir() if (d / "memory").is_dir()]
+        m = config.load()["memory_dir"]
+        return [(d / m).resolve() for d in pdir.iterdir() if (d / m).is_dir()]
 
     def allowed(self, path):
         p = Path(path).resolve()
         if p.suffix.lower() != ".md" or p.parent not in self.memory_dirs():
             raise WriteError(403, "Path is outside the allow-listed memory folders.")
-        if FROZEN in str(p).lower():
+        if any(n.lower() in str(p).lower() for n in config.load()["protected_names"]):
             raise WriteError(403, "This folder is frozen and never modified.")
         return p
 
@@ -72,7 +71,7 @@ class Writer:
     def folder_of(self, project_id):
         if not project_id.startswith("proj:"):
             raise WriteError(400, "Bad project id.")
-        d = (self.brain.home / "projects" / project_id[5:] / "memory")
+        d = (self.brain.home / "projects" / project_id[5:] / config.load()["memory_dir"])
         return self.allowed(d / "x.md").parent
 
     # ---------- reading for the editor ----------
@@ -97,7 +96,7 @@ class Writer:
 
     def _save_journal(self, j):
         self.trash.mkdir(parents=True, exist_ok=True)
-        self._journal_path().write_text(json.dumps(j[-200:], indent=1), encoding="utf-8")
+        self._journal_path().write_text(json.dumps(j[-config.load()["undo_history"]:], indent=1), encoding="utf-8")
 
     def _begin(self, op, desc):
         oid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
@@ -120,7 +119,7 @@ class Writer:
         if crlf:
             data = data.replace("\n", "\r\n")
         raw = data.encode("utf-8")
-        if len(raw) > MAX_BYTES:
+        if len(raw) > config.load()["max_note_bytes"]:
             raise WriteError(413, "Note is too large.")
         tmp = path.with_name(path.name + ".brain-tmp")
         with open(tmp, "wb") as fh:
@@ -189,8 +188,8 @@ class Writer:
         self.require_enabled()
         with self.lock:
             p = self.node_path(nid)
-            if p.name == "MEMORY.md":
-                raise WriteError(400, "MEMORY.md cannot be trashed.")
+            if p.name == config.load()["index_file"]:
+                raise WriteError(400, "The index file cannot be trashed.")
             self._check_hash(p, base_hash)
             e = self._begin("trash", f"Trash {p.name}")
             self._backup(e, p)
@@ -205,8 +204,8 @@ class Writer:
             if len(ids) < 2 or len(set(ids)) != len(ids):
                 raise WriteError(400, "Pick at least two different notes.")
             paths = [self.node_path(i) for i in ids]
-            if any(p.name == "MEMORY.md" for p in paths):
-                raise WriteError(400, "MEMORY.md cannot be merged.")
+            if any(p.name == config.load()["index_file"] for p in paths):
+                raise WriteError(400, "The index file cannot be merged.")
             for i, p in zip(ids, paths):
                 self._check_hash(p, base_hashes.get(i))
             infos = [self.load(i) for i in ids]
@@ -227,7 +226,7 @@ class Writer:
                 self._delete(e, p)
             for folder in self.memory_dirs():  # rewrite [[links]] in every other note
                 for f in folder.glob("*.md"):
-                    if f in paths or f.name == "MEMORY.md":
+                    if f in paths or f.name == config.load()["index_file"]:
                         continue
                     raw = f.read_bytes().decode("utf-8", errors="replace")
                     new = self._rewrite_links(raw, merged_names, keep_name)
@@ -261,7 +260,7 @@ class Writer:
 
     def _edit_index(self, entry, folder, add=(), remove=()):
         """Keep MEMORY.md consistent: `- [Title](file.md) — hook`, one line per note."""
-        idx = self.allowed(Path(folder) / "MEMORY.md")
+        idx = self.allowed(Path(folder) / config.load()["index_file"])
         old = idx.read_bytes().decode("utf-8", errors="replace") if idx.exists() else "# Memory Index\n\n"
         crlf = "\r\n" in old
         lines = old.replace("\r\n", "\n").split("\n")

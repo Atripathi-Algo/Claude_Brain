@@ -3,11 +3,9 @@ import re
 import sqlite3
 from pathlib import Path
 
-from . import parsers
+from . import config, parsers
 from .graph import est_tokens
 from .redact import redact
-
-LINE_CAP, BYTE_CAP = 200, 25 * 1024
 
 
 def _project_label(brain, folder):
@@ -29,6 +27,8 @@ def token_metrics(brain):
 
 def context_cost(brain):
     """Per project: tokens loaded every session = user CLAUDE.md + project CLAUDE.md + capped MEMORY.md."""
+    cfg = config.load()
+    LINE_CAP, BYTE_CAP = cfg["index_line_cap"], cfg["index_byte_cap"]
     with brain.lock:
         user = brain.nodes.get("claude_md:user")
         user_tok = user["tokens_est"] if user else 0
@@ -38,7 +38,7 @@ def context_cost(brain):
                 continue
             proj_tok = 0
             if p["path"] and Path(p["path"]).is_dir():
-                cm = Path(p["path"]) / "CLAUDE.md"
+                cm = Path(p["path"]) / cfg["project_file"]
                 if cm.is_file():
                     proj_tok = est_tokens(len(parsers.read_text(cm)))
             idx = brain.indexes.get(pid)

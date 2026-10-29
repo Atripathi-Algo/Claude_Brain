@@ -6,6 +6,8 @@ import time
 from collections import deque
 from pathlib import Path
 
+from . import config
+
 
 def diff(old_nodes, old_edges, new_nodes, new_edges):
     """-> list of (event_type, payload)."""
@@ -112,19 +114,18 @@ class Service:
 class Watcher:
     """watchdog observer + debounce thread + periodic reconcile."""
 
-    MD_DELAY, JSONL_DELAY = 0.5, 8.0
-
-    def __init__(self, service, reconcile_minutes=5):
-        self.svc, self.reconcile = service, reconcile_minutes * 60
+    def __init__(self, service):
+        self.svc = service
         self.md_at = self.jsonl_at = 0.0
         self.stop = threading.Event()
         self.observer = None
         self.paused = False
 
     def _on_event(self, path):
+        cfg = config.load()
         p = str(path).lower()
         now = time.time()
-        if p.endswith(".md") and ("memory" in p or p.endswith("claude.md")):
+        if p.endswith(".md") and (cfg["memory_dir"].lower() in p or p.endswith(cfg["project_file"].lower())):
             self.md_at = now
         elif p.endswith(".jsonl"):
             self.jsonl_at = self.jsonl_at or now
@@ -163,13 +164,14 @@ class Watcher:
             if self.paused:
                 continue
             now = time.time()
-            if self.md_at and now - self.md_at >= self.MD_DELAY:
+            cfg = config.load()
+            if self.md_at and now - self.md_at >= cfg["debounce_md_seconds"]:
                 self.md_at = 0.0
                 self.svc.refresh(scan_transcripts=False)
-            elif self.jsonl_at and now - self.jsonl_at >= self.JSONL_DELAY:
+            elif self.jsonl_at and now - self.jsonl_at >= cfg["throttle_transcript_seconds"]:
                 self.jsonl_at = 0.0
                 self.svc.refresh()
                 last_full = time.time()
-            elif now - last_full >= self.reconcile:
+            elif now - last_full >= cfg["refresh_minutes"] * 60:
                 self.svc.refresh()
                 last_full = time.time()
