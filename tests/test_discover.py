@@ -26,3 +26,22 @@ def test_discovery_is_off_by_default(home, tmp_path):
     b = Brain(home=home, state_path=tmp_path / "s.json")
     b.rebuild()
     assert not any("not_in_claude_store" in n["flags"] for n in b.nodes.values())
+
+
+def test_temporary_projects_flagged_and_labels_made_unique(home, tmp_path):
+    import json, tempfile
+    for folder, cwd in [("C--t-one", str(tmp_path / "gen" / "repo")), ("C--t-two", str(tmp_path / "other" / "repo")),
+                        ("C--real", r"C:\work\repo")]:
+        d = home / "projects" / folder
+        d.mkdir(parents=True)
+        (d / "s.jsonl").write_text(json.dumps({"type": "user", "cwd": cwd}) + "\n", encoding="utf-8")
+    b = Brain(home=home, state_path=tmp_path / "s.json")
+    b.rebuild()
+    p = {n["id"]: n for n in b.nodes.values() if n["kind"] == "project"}
+    assert str(tmp_path).lower().startswith(tempfile.gettempdir().lower())  # pytest tmp is under the system temp dir
+    assert "temporary" in p["proj:C--t-one"]["flags"] and "temporary" not in p["proj:C--real"]["flags"]
+    labels = [p[i]["label"] for i in ("proj:C--t-one", "proj:C--t-two", "proj:C--real")]
+    assert len(set(labels)) == 3 and any("gen" in l for l in labels)
+    assert p["proj:C--t-one"]["temporary"] if "temporary" in p["proj:C--t-one"] else True
+    child = [n for n in b.nodes.values() if n.get("project") == "proj:C--t-one"]
+    assert all(n["temporary"] for n in child)

@@ -58,6 +58,42 @@ def context_cost(brain):
         return out
 
 
+def overview(brain):
+    """One-screen audit: what exists, what is used, and what is worth cleaning up."""
+    cfg = config.load()
+    with brain.lock:
+        projects = [n for n in brain.nodes.values() if n["kind"] == "project"]
+        notes = [n for n in brain.nodes.values() if n["kind"] == "memory"]
+        temp = [p for p in projects if "temporary" in p["flags"]]
+        real = [p for p in projects if "temporary" not in p["flags"]]
+        with_notes = [p for p in real if "no_memory" not in p["flags"]]
+        active = [p for p in real if p.get("last_active")]
+        unread = sorted((n for n in notes if not n["read_count"]), key=lambda n: -n["tokens_est"])
+        label = lambda n: brain.nodes[n["project"]]["label"]
+        usage = {}
+        for folder, days in brain.state.get("usage", {}).items():
+            for day, v in days.items():
+                usage[day] = usage.get(day, 0) + v[0] + v[1] + v[3]
+        recent = sorted(usage)[-30:]
+        issues = {}
+        for i in brain.health():
+            k = i["issue"].split(":")[0]
+            issues[k] = issues.get(k, 0) + 1
+    return {
+        "projects": {"total": len(projects), "temporary": len(temp), "real": len(real), "with_notes": len(with_notes),
+                     "active": len(active), "empty": len(real) - len(with_notes),
+                     "not_in_store": sum("not_in_claude_store" in p["flags"] for p in projects)},
+        "notes": {"total": len(notes), "never_read": len(unread), "read": len(notes) - len(unread),
+                  "tokens_est": sum(n["tokens_est"] for n in notes)},
+        "never_read": [{"id": n["id"], "label": n["label"], "project": label(n), "tokens_est": n["tokens_est"]} for n in unread[:15]],
+        "most_active": [{"id": p["id"], "label": p["label"], "last_active": p["last_active"], "sessions": p.get("sessions", 0)}
+                        for p in sorted(active, key=lambda p: p["last_active"], reverse=True)[:8]],
+        "issues": issues,
+        "tokens_last_days": {"days": len(recent), "total": sum(usage[d] for d in recent)},
+        "note": f"Token counts are estimates (characters / {cfg['chars_per_token']}); 'never read' means no Read of the file was found in your transcripts.",
+    }
+
+
 def memory_growth(brain):
     """Cumulative note count by last-modified day (file mtime; creation time is unknown)."""
     with brain.lock:

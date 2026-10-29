@@ -6,8 +6,8 @@ export const TYPE_COLOR: Record<string, string> = {
 };
 export const colorOf = (n: GNode) => (n.kind === "project" ? TYPE_COLOR.project_hub : TYPE_COLOR[n.kind === "memory" ? n.type : n.kind] ?? TYPE_COLOR[n.type] ?? TYPE_COLOR.unknown);
 
-export interface Filters { project: string; kinds: Set<string>; types: Set<string>; inferred: boolean; q: string; recentDays: number; drive: string; emptyProjects: boolean }
-export const defaultFilters = (): Filters => ({ project: "", kinds: new Set(), types: new Set(), inferred: true, q: "", recentDays: 0, drive: "", emptyProjects: true });
+export interface Filters { project: string; kinds: Set<string>; types: Set<string>; inferred: boolean; q: string; recentDays: number; drive: string; emptyProjects: boolean; temporary: boolean }
+export const defaultFilters = (): Filters => ({ project: "", kinds: new Set(), types: new Set(), inferred: true, q: "", recentDays: 0, drive: "", emptyProjects: true, temporary: false });
 
 export function applyFilters(g: GraphData, f: Filters): { nodes: GNode[]; edges: GEdge[] } {
   const cutoff = f.recentDays ? Date.now() - f.recentDays * 864e5 : 0;
@@ -16,6 +16,7 @@ export function applyFilters(g: GraphData, f: Filters): { nodes: GNode[]; edges:
     (!f.kinds.size || f.kinds.has(n.kind)) &&
     (!f.types.size || f.types.has(n.type)) &&
     (!f.drive || n.drive === f.drive) &&
+    (f.temporary || !n.temporary) &&
     (f.emptyProjects || !(n.kind === "project" && n.flags.includes("no_memory"))) &&
     (!cutoff || n.mtime * 1000 >= cutoff);
   const nodes = g.nodes.filter(keep);

@@ -80,6 +80,10 @@ def create_app(brain=None, auto_scan=True, watch=None):
     def search(q: str = ""):
         return metrics.search(brain, q)
 
+    @app.get("/api/overview")
+    def overview():
+        return metrics.overview(brain)
+
     @app.get("/api/metrics/tokens")
     def tokens():
         return metrics.token_metrics(brain)

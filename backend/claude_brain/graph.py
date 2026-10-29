@@ -3,6 +3,7 @@ import itertools
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 from functools import wraps
@@ -21,6 +22,11 @@ def _ghost(name):
     return {"id": "ghost:" + name, "kind": "ghost", "label": name, "project": None, "type": "ghost",
             "path": None, "mtime": 0, "size": 0, "tokens_est": 0,
             "last_read_at": None, "read_count": 0, "flags": ["ghost"]}
+
+
+def _neg(day):
+    """Sort key that puts later ISO dates first."""
+    return [-ord(c) for c in day] if day else []
 
 
 def _locked(fn):
@@ -102,10 +108,13 @@ class Brain:
                     self._cwd[pd.name] = transcripts.project_cwd(pd)
                 cwd = self._cwd[pd.name]
                 m = re.match(r"^([A-Za-z]):", cwd or "") or re.match(r"^([A-Za-z])--", pd.name)
+                days = self.state.get("usage", {}).get(pd.name, {})
+                flags = ([] if files else ["no_memory"]) + (["temporary"] if self._is_temp(cwd, pd.name) else [])
                 add({"id": pid, "kind": "project", "label": Path(cwd).name if cwd else pd.name, "project": pid,
                      "type": "project", "path": cwd or str(pd), "mtime": 0, "size": 0, "tokens_est": 0,
                      "last_read_at": None, "read_count": 0, "drive": m.group(1).upper() if m else None,
-                     "flags": [] if files else ["no_memory"]})
+                     "last_active": max(days) if days else None,
+                     "sessions": len(list(pd.glob("*.jsonl"))), "flags": flags})
                 pcm = Path(cwd) / project_file if cwd else None  # the project's own instructions file, if it still exists
                 if pcm and pcm.is_file():
                     cid = f"claude_md:{pd.name}"
@@ -189,6 +198,7 @@ class Brain:
         for (a, b), w in co.items():
             self.edges.append(self._edge(a, b, "co_read", False, w))
 
+        self._unique_labels()
         self._similar(cfg["similarity_threshold"], cfg["similar_top_k"], cfg["duplicate_threshold"])
 
         seen, out = set(), []
@@ -205,12 +215,40 @@ class Brain:
                 deg[e["dst"]] = deg.get(e["dst"], 0) + 1
         for i, n in self.nodes.items():
             n["degree"] = deg.get(i, 0)
+            owner = self.nodes.get(n.get("project"))
             if n["kind"] != "project":
-                n["drive"] = self.nodes[n["project"]].get("drive") if n.get("project") in self.nodes else None
+                n["drive"] = owner.get("drive") if owner else None
+            n["temporary"] = bool(owner and "temporary" in owner["flags"])
         for pid, n in self.nodes.items():
             if n["kind"] == "project":
                 n["tokens_est"] = sum(m["tokens_est"] for m in self.nodes.values()
                                       if m["project"] == pid and m["kind"] in ("memory", "index", "claude_md"))
+
+    @staticmethod
+    def _is_temp(cwd, folder):
+        """Auto-generated scratch projects live under the system temp dir (found at runtime, not hard-coded)."""
+        tmp = tempfile.gettempdir()
+        if cwd:
+            return os.path.normcase(os.path.normpath(cwd)).startswith(os.path.normcase(os.path.normpath(tmp)))
+        return folder.startswith(re.sub(r"[^A-Za-z0-9]", "-", tmp))
+
+    def _unique_labels(self):
+        """Two projects named 'repo' are indistinguishable in the UI: add the parent folder to repeats."""
+        groups = {}
+        for n in self.nodes.values():
+            if n["kind"] == "project":
+                groups.setdefault(n["label"], []).append(n)
+        for label, ns in groups.items():
+            if len(ns) > 1:
+                for n in ns:
+                    parent = Path(n["path"]).parent.name if n["path"] else ""
+                    n["label"] = f"{label} ({parent})" if parent and parent.lower() != label.lower() else label
+        seen = {}
+        for n in self.nodes.values():  # still identical (same parent name): number them
+            if n["kind"] == "project":
+                seen[n["label"]] = seen.get(n["label"], 0) + 1
+                if seen[n["label"]] > 1:
+                    n["label"] = f"{n['label']} #{seen[n['label']]}"
 
     def _disk_projects(self):
         """Disk scan is cached for `ttl` seconds so frequent refreshes stay cheap."""
@@ -307,10 +345,12 @@ class Brain:
                     groups.setdefault(n["type"], []).append(
                         {"id": n["id"], "label": n["label"], "tokens_est": n["tokens_est"], "flags": n["flags"]})
             out.append({"id": pid, "label": p["label"], "tokens_est": p["tokens_est"], "drive": p.get("drive"),
-                        "no_memory": "no_memory" in p["flags"],
+                        "no_memory": "no_memory" in p["flags"], "temporary": "temporary" in p["flags"],
+                        "last_active": p.get("last_active"), "sessions": p.get("sessions", 0),
                         "types": [{"type": t, "tokens_est": sum(x["tokens_est"] for x in v), "notes": v}
                                   for t, v in sorted(groups.items())]})
-        out.sort(key=lambda r: (-r["tokens_est"], r["label"].lower()))
+        # useful order: projects with notes first, then most recently active, temporary scratch folders last
+        out.sort(key=lambda r: (r["temporary"], r["no_memory"], r["last_active"] is None, _neg(r["last_active"]), r["label"].lower()))
         return out
 
     @_locked

@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { rescan } from "./api";
 import { useLiveGraph } from "./live";
 import Health from "./Health";
+import Overview from "./Overview";
 import { call, CacheDialog, CreateDialog, SettingsDialog } from "./WritePanel";
 import { applyFilters, defaultFilters, TYPE_COLOR, webglOk, type Filters } from "./model";
 import Inspector from "./Inspector";
@@ -17,7 +18,7 @@ export default function App() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const loading = busy || !!status?.scanning;
-  const [view, setView] = useState<"brain" | "tree" | "charts" | "health">("brain");
+  const [view, setView] = useState<"overview" | "brain" | "tree" | "charts" | "health">("overview");
   const [mode, setMode] = useState<"3d" | "2d">("3d");
   const [notice, setNotice] = useState("");
   const [f, setF] = useState<Filters>(defaultFilters());
@@ -66,6 +67,7 @@ export default function App() {
       <header>
         <h1>Claude Brain <small>{writeOn ? "write mode" : "read-only"}</small></h1>
         <nav>
+          <button className={view === "overview" ? "on" : ""} onClick={() => setView("overview")}>Overview</button>
           <button className={view === "brain" ? "on" : ""} onClick={() => setView("brain")}>Brain</button>
           <button className={view === "tree" ? "on" : ""} onClick={() => setView("tree")}>Tree</button>
           <button className={view === "charts" ? "on" : ""} onClick={() => setView("charts")}>Charts</button>
@@ -90,6 +92,7 @@ export default function App() {
           <option value="">All drives</option>
           {[...new Set(projects.map((p) => p.drive).filter(Boolean))].sort().map((d) => <option key={d} value={d}>{d}:</option>)}
         </select>
+        <label><input type="checkbox" checked={f.temporary} onChange={() => setF({ ...f, temporary: !f.temporary })} />temporary projects ({projects.filter((p) => p.temporary).length})</label>
         <label><input type="checkbox" checked={f.emptyProjects} onChange={() => setF({ ...f, emptyProjects: !f.emptyProjects })} />projects without notes</label>
         <select value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} aria-label="Project">
           <option value="">All projects</option>
@@ -111,8 +114,10 @@ export default function App() {
 
       <main>
         <section className="stage">
-          {view === "tree" ? (
-            <TreeView selected={selected} onSelect={select} seq={g.seq} />
+          {view === "overview" ? (
+            <Overview tick={g.seq + metricsTick + version} onOpen={(id) => { setView("brain"); select(id); }} onShowTemporary={() => { setF({ ...f, temporary: true }); setView("tree"); }} />
+          ) : view === "tree" ? (
+            <TreeView selected={selected} onSelect={select} seq={g.seq} showTemporary={f.temporary} />
           ) : view === "charts" ? (
             <Suspense fallback={<div className="empty">Loading charts…</div>}><Charts tick={metricsTick + g.seq} onSelect={select} /></Suspense>
           ) : view === "health" ? (
